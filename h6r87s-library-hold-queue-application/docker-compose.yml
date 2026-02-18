@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    working_dir: /app
+    command: sh -c "cd /app/tests && npm run test:all"
+    environment:
+      - NODE_ENV=test
+      - CI=true
+    volumes:
+      - ./evaluation:/app/evaluation

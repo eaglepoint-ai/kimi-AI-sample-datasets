@@ -1,0 +1,10 @@
+{
+  "instance_id": "80BYPP",
+  "problem_statement": "Write a comprehensive Jest test suite for a TypeScript priority task queue that processes asynchronous jobs (email, reports, etc.) with configurable concurrency limits, retry logic using exponential backoff, and timeout recovery, to uncover the observed defects where high‑priority tasks are delayed behind lower‑priority ones under load, retry delays fail to increase correctly, and timed‑out tasks leak. The tests must cover all public methods, verify business rules for priority ordering, retry scheduling, and concurrency enforcement, and include both happy‑path and edge‑case scenarios such as overload conditions, duplicate tasks, and state transitions. Organize tests by feature area, ensure deterministic isolation, and validate that the queue correctly handles priority inversion, exponential backoff, and timely cleanup of stuck tasks.",
+  "base_commit": "repository_before/",
+  "test_patch": "tests/",
+  "github_url": "https://github.com/eaglepoint-ai/kimi-AI-sample-datasets/tree/main/80bypp-special-task-queue-typescript",
+  "environment_setup": "Dockerfile",
+  "FAIL_TO_PASS": [],
+  "PASS_TO_PASS": []
+}

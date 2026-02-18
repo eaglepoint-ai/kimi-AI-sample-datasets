@@ -1,0 +1,48 @@
+{
+  "counters": {
+    "bookId": 2,
+    "holdId": 4
+  },
+  "books": [
+    {
+      "id": 1,
+      "title": "The hobbit",
+      "copiesTotal": 1,
+      "copiesAvailable": 1
+    }
+  ],
+  "holds": [
+    {
+      "id": 0,
+      "bookId": 1,
+      "email": "alice@example.com",
+      "position": 1,
+      "frozen": false,
+      "fulfilled": true
+    },
+    {
+      "id": 1,
+      "bookId": 1,
+      "email": "ali@example.com",
+      "position": 2,
+      "frozen": false,
+      "fulfilled": true
+    },
+    {
+      "id": 2,
+      "bookId": 1,
+      "email": "aliya@example.com",
+      "position": 3,
+      "frozen": false,
+      "fulfilled": true
+    },
+    {
+      "id": 3,
+      "bookId": 1,
+      "email": "aliye@example.com",
+      "position": 4,
+      "frozen": false,
+      "fulfilled": true
+    }
+  ]
+}

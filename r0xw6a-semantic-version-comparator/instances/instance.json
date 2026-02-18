@@ -1,0 +1,10 @@
+{
+  "instance_id": "R0XW6A",
+  "problem_statement": "Enhance test coverage for a Go semantic version comparator by writing table-driven unit tests (stdlib only) that verify correct results for equal (0), less-than (-1), and greater-than (1) version comparisons. Tests must cover versions with different component lengths (e.g., \\\"1.0\\\" = \\\"1.0.0\\\"), ignore pre-release suffixes, and handle invalid inputs safely without panicking, while not modifying the existing implementation.",
+  "base_commit": "repository_before/",
+  "test_patch": "tests/",
+  "github_url": "https://github.com/eaglepoint-ai/kimi-AI-sample-datasets/tree/main/r0xw6a-semantic-version-comparator",
+  "environment_setup": "Dockerfile",
+  "FAIL_TO_PASS": [],
+  "PASS_TO_PASS": []
+}

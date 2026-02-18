@@ -1,0 +1,10 @@
+# Docker Compose file for running tests and evaluation
+
+services:
+  app:
+    build: .
+    environment:
+      - CI=true
+    command: node evaluation/evaluation.js
+    volumes:
+      - ./evaluation/reports:/app/evaluation/reports

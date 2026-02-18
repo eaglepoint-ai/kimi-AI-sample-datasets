@@ -1,0 +1,11 @@
+{
+  "instance_id": "H6R87S",
+  "problem_statement": "Build a library hold-queue app where users place holds on books and receive copies when they become the first eligible in line. Users can freeze a hold to keep their position but be skipped, and unfreeze to become eligible again. When a copy is returned, the system assigns it to the first non-frozen, unfulfilled hold while keeping positions stable and preventing duplicate holds per user per book. Implement using a React frontend, Node.js/Express backend, and JSON file storage only.",
+  "base_commit": "repository_before/",
+  "test_patch": "tests/",
+  "github_url": "https://github.com/eaglepoint-ai/kimi-AI-sample-datasets/tree/main/h6r87s-library-hold-queue-application",
+  "environment_setup": "Dockerfile",
+  "FAIL_TO_PASS": [],
+  "PASS_TO_PASS": []
+}
+        

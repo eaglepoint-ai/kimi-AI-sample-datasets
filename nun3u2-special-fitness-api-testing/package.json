@@ -1,0 +1,24 @@
+{
+  "name": "fitness-api-testing-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "run-tests": "cd repository_after && npx jest --config jest.config.ts --verbose --forceExit",
+    "run-metatests": "npx jest --config meta-jest.config.ts --verbose --forceExit",
+    "evaluate": "npx ts-node evaluation/evaluate.ts evaluate"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.0",
+    "@types/supertest": "^6.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "uuid": "^9.0.0",
+    "@types/uuid": "^9.0.7",
+    "express": "^5.2.1",
+    "@types/express": "^5.0.6"
+  }
+}

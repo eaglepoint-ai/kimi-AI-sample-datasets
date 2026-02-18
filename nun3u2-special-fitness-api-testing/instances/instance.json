@@ -1,0 +1,11 @@
+{
+  "instance_id": "NUN3U2",
+  "problem_statement": "Develop a comprehensive Jest + Supertest integration test suite in TypeScript for the fitness tracking Express API that validates all endpoints—user lifecycle, workout logging, streak tracking, badge evaluation, and recommendations—by interacting with the HTTP layer using a fixture‑controlled JSON data store. The suite must enforce deterministic isolation via state resets, manipulate time for streak/recommendation edge cases, and verify response structures, business rules (e.g., badge criteria, equipment constraints), and error handling across both happy‑path and exceptional flows. Organize tests by feature domain, ensure full async correctness, and provide clear diagnostic output to detect regressions in this production‑critical prototype.",
+  "base_commit": "repository_before/",
+  "test_patch": "tests/",
+  "github_url": "https://github.com/eaglepoint-ai/kimi-AI-sample-datasets/tree/main/nun3u2-special-fitness-api-testing",
+  "environment_setup": "Dockerfile",
+  "FAIL_TO_PASS": [],
+  "PASS_TO_PASS": []
+}
+        

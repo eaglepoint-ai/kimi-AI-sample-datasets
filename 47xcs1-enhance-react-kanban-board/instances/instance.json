@@ -1,0 +1,10 @@
+{
+  "instance_id": "47XCS1",
+  "problem_statement": "Enhance the existing two-column React Kanban board by adding task add, edit, delete, priority display/change, and localStorage persistence, while keeping the current drag-and-drop behavior and task structure (name, category, bgcolor) unchanged. Ensure name remains the only unique ID, prevent duplicates, derive priority from bgcolor, use no new dependencies, and avoid console errors.",
+  "base_commit": "repository_before/",
+  "test_patch": "tests/",
+  "github_url": "https://github.com/eaglepoint-ai/kimi-AI-sample-datasets/tree/main/47xcs1-enhance-react-kanban-board",
+  "environment_setup": "Dockerfile",
+  "FAIL_TO_PASS": [],
+  "PASS_TO_PASS": []
+}

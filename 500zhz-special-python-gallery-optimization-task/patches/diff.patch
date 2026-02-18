@@ -1,0 +1,290 @@
+diff --git a/repository_before/gallery.py b/repository_after/gallery.py
+index 81d4167..12013f9 100644
+--- a/repository_before/gallery.py
++++ b/repository_after/gallery.py
+@@ -1,9 +1,10 @@
+ from datetime import datetime
+ from typing import List, Optional, Dict, Any
++from bisect import insort
+ 
+ 
+ class Image:
+-    def __init__(self, id: str, filename: str, album_id: Optional[str], 
++    def __init__(self, id: str, filename: str, album_id: Optional[str],
+                  uploaded_at: datetime, size_bytes: int, width: int, height: int):
+         self.id = id
+         self.filename = filename
+@@ -12,7 +13,7 @@ class Image:
+         self.size_bytes = size_bytes
+         self.width = width
+         self.height = height
+-    
++
+     def to_dict(self) -> Dict[str, Any]:
+         return {
+             'id': self.id,
+@@ -24,17 +25,98 @@ class Image:
+             'height': self.height
+         }
+ 
++    def __lt__(self, other):
++        if not isinstance(other, Image):
++            return NotImplemented
++        if self.uploaded_at != other.uploaded_at:
++            return self.uploaded_at < other.uploaded_at
++        return self.id < other.id
++
+ 
+ class ImageGallery:
++    """
++    Optimized image gallery with O(k) pagination retrieval.
++
++    MEMORY OPTIMIZATION STRATEGY (Requirement 6):
++    =============================================
++
++    This implementation optimizes memory usage through three key strategies:
++
++    1. REFERENCE-BASED INDICES (No Data Duplication):
++       - self._all_sorted and self._album_indices store references to Image objects,
++         not copies. Each Image object exists only once in memory (in self.images).
++       - The sorted indices are lists of references, adding only ~8 bytes per reference
++         (Python object pointer) rather than duplicating the full Image object (~200+ bytes).
++       - Memory overhead: O(N) for references vs O(N * object_size) if we copied objects.
++
++    2. VIRTUAL REVERSE PATTERN (50% Memory Savings):
++       - We store only ascending sorted order in self._all_sorted.
++       - Descending order is calculated mathematically during pagination by computing
++         reverse indices and reversing only the small k-sized result slice.
++       - This avoids storing a separate descending index, saving 50% of index memory.
++       - Trade-off: O(k) time to reverse k items vs O(N) space to store full reverse index.
++
++    3. ZERO-COPY SLICING (Minimal Materialization):
++       - Pagination uses Python list slicing (target_list[start:end]) which creates
++         a new list containing only references to the k requested items.
++       - No intermediate lists of size N are created during pagination.
++       - Only the final k items are serialized via to_dict(), materializing exactly
++         what's needed for the response.
++       - Memory per request: O(k) for the result slice, not O(N) for intermediate copies.
++
++    MEMORY FOOTPRINT ANALYSIS:
++    - Raw storage (self.images): N objects
++    - Global sorted index (self._all_sorted): N references (~8 bytes each)
++    - Per-album indices (self._album_indices): ~0.8N references (assuming 80% have albums)
++    - Total overhead: ~1.8N references = ~14.4 bytes per image
++    - Per-request overhead: O(k) for result slice only
++
++    COMPARISON TO NAIVE APPROACH:
++    - Naive (copy + filter + sort per request): O(N) memory per request
++    - Optimized (precomputed indices + slicing): O(k) memory per request
++    - Savings: For N=100K, k=20: 100,000 vs 20 objects per request (5000x reduction)
++    """
++
+     def __init__(self):
+         self.images: List[Image] = []
+-    
++        self._all_sorted: List[Image] = []
++        self._album_indices: Dict[str, List[Image]] = {}
++
+     def add_image(self, image: Image) -> None:
++        """
++        Add an image while maintaining sorted indices.
++        PYTHON 3.8 COMPATIBILITY: Uses Image.__lt__ instead of key parameter.
++        Note: bisect.insort finds position in O(log n) but insertion is O(n) due to list shifting.
++        """
+         self.images.append(image)
+-    
++
++        insort(self._all_sorted, image)
++
++        if image.album_id:
++            if image.album_id not in self._album_indices:
++                self._album_indices[image.album_id] = []
++            insort(self._album_indices[image.album_id], image)
++
+     def add_images(self, images: List[Image]) -> None:
++        """
++        Batch optimized addition.
++        PYTHON 3.8 COMPATIBILITY: Uses Image.__lt__ for sorting.
++        Complexity: O(M log M) where M = total images after addition.
++        """
++        if not images:
++            return
++
+         self.images.extend(images)
+-    
++
++        self._all_sorted = sorted(self.images)
++
++        self._album_indices.clear()
++        for img in self._all_sorted:
++            if img.album_id:
++                if img.album_id not in self._album_indices:
++                    self._album_indices[img.album_id] = []
++                self._album_indices[img.album_id].append(img)
++
+     def get_paginated_images(
+         self,
+         page: int = 1,
+@@ -42,106 +124,71 @@ class ImageGallery:
+         album_id: Optional[str] = None,
+         sort_ascending: bool = False
+     ) -> Dict[str, Any]:
++        """
++        Retrieve a page of images with O(k) time and memory complexity.
++
++        MEMORY OPTIMIZATION DETAILS:
++        - No full dataset copies: Uses direct reference to precomputed sorted indices
++        - No intermediate filtering: Album indices are pre-filtered, no runtime scanning
++        - Minimal slicing: Only creates a list of k references (target_list[start:end])
++        - Lazy serialization: Only calls to_dict() on the k items in the result
++        - Virtual reverse: Descending order calculated mathematically, no stored reverse index
++
++        Time Complexity: O(k) where k = page_size
++        Memory Complexity: O(k) for result slice only
++        """
+         if page < 1:
+             raise ValueError("Page number must be at least 1")
+-        
+-        all_images = list(self.images)
+-        
++
++        # MEMORY OPTIMIZATION: Direct reference to precomputed index (no copy)
++        target_list: List[Image]
+         if album_id is not None:
+-            filtered_images = []
+-            for img in all_images:
+-                if img.album_id == album_id:
+-                    filtered_images.append(img)
++            target_list = self._album_indices.get(album_id, [])
+         else:
+-            filtered_images = all_images
+-        
+-        sorted_images = sorted(
+-            filtered_images,
+-            key=lambda img: img.uploaded_at,
+-            reverse=not sort_ascending
+-        )
+-        
+-        total_count = len(sorted_images)
++            target_list = self._all_sorted
++
++        total_count = len(target_list)
+         total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
+-        
+-        start_index = (page - 1) * page_size
+-        end_index = start_index + page_size
+-        page_images = sorted_images[start_index:end_index]
+-        
+-        result_images = [img.to_dict() for img in page_images]
+-        
++
++        result_imgs: List[Image] = []
++
++        if total_count > 0 and page <= total_pages:
++            start_offset = (page - 1) * page_size
++
++            if sort_ascending:
++                # MEMORY OPTIMIZATION: Slice creates list of k references only
++                end_offset = start_offset + page_size
++                result_imgs = target_list[start_offset:end_offset]
++            else:
++                # MEMORY OPTIMIZATION: Virtual reverse pattern
++                # Calculate descending indices mathematically instead of storing reverse index
++                # Only reverse the small k-sized slice, not the entire dataset
++                rev_start = total_count - (page - 1) * page_size
++                rev_end = rev_start - page_size
++
++                actual_end = max(0, rev_end)
++                actual_start = min(total_count, rev_start)
++
++                if actual_start > 0:
++                    # Slice k items and reverse only those k items (O(k) memory)
++                    subset = target_list[actual_end:actual_start]
++                    result_imgs = subset[::-1]
++
++        # MEMORY OPTIMIZATION: Serialize only k items, not entire dataset
++        result_data = [img.to_dict() for img in result_imgs]
++
+         return {
+-            'images': result_images,
++            'images': result_data,
+             'total_count': total_count,
+             'page': page,
+             'page_size': page_size,
+             'total_pages': total_pages
+         }
+-    
++
+     def get_album_image_count(self, album_id: str) -> int:
+-        count = 0
+-        for img in self.images:
+-            if img.album_id == album_id:
+-                count += 1
+-        return count
+-    
++        """O(1) lookup"""
++        return len(self._album_indices.get(album_id, []))
++
+     def get_all_album_ids(self) -> List[str]:
+-        album_ids = set()
+-        for img in self.images:
+-            if img.album_id is not None:
+-                album_ids.add(img.album_id)
+-        return list(album_ids)
+-
+-
+-def generate_test_images(count: int, num_albums: int = 10) -> List[Image]:
+-    import random
+-    from datetime import timedelta
+-    
+-    images = []
+-    base_date = datetime(2020, 1, 1)
+-    
+-    for i in range(count):
+-        img = Image(
+-            id=f"img_{i:06d}",
+-            filename=f"photo_{i:06d}.jpg",
+-            album_id=f"album_{i % num_albums:03d}" if i % 5 != 0 else None,
+-            uploaded_at=base_date + timedelta(seconds=random.randint(0, 86400 * 365 * 4)),
+-            size_bytes=random.randint(100000, 5000000),
+-            width=random.choice([1920, 3840, 4032, 1080]),
+-            height=random.choice([1080, 2160, 3024, 1920])
+-        )
+-        images.append(img)
+-    
+-    return images
+-
+-
+-if __name__ == "__main__":
+-    import time
+-    
+-    print("Generating 10,000 test images...")
+-    test_images = generate_test_images(10000)
+-    
+-    gallery = ImageGallery()
+-    gallery.add_images(test_images)
+-    
+-    print("\nBenchmarking pagination performance:\n")
+-    
+-    for page_num in [1, 10, 50, 100, 500]:
+-        start = time.perf_counter()
+-        result = gallery.get_paginated_images(page=page_num, page_size=20)
+-        elapsed = time.perf_counter() - start
+-        print(f"Page {page_num:3d}: {elapsed*1000:.2f}ms - Retrieved {len(result['images'])} images")
+-    
+-    print("\nBenchmarking with album filter:\n")
+-    
+-    for page_num in [1, 10, 50]:
+-        start = time.perf_counter()
+-        result = gallery.get_paginated_images(page=page_num, page_size=20, album_id="album_003")
+-        elapsed = time.perf_counter() - start
+-        print(f"Album filter, Page {page_num:2d}: {elapsed*1000:.2f}ms - Retrieved {len(result['images'])} images")
+-    
+-    print("\n" + "="*60)
+-    print("ISSUE: Notice that fetching page 500 takes the same time as page 1")
+-    print("       because we sort ALL images before slicing to the page.")
+-    print("       This is O(n log n) for EVERY request regardless of page.")
+-    print("="*60)
+\ No newline at end of file
++        """O(A) where A is number of albums"""
++        return list(self._album_indices.keys())

@@ -1,0 +1,1684 @@
+diff --git a/repository_before/package.json b/repository_before/package.json
+deleted file mode 100644
+index 02fed10..0000000
+--- a/repository_before/package.json
++++ /dev/null
+@@ -1,16 +0,0 @@
+-{
+-    "name": "task-queue-testing",
+-    "version": "1.0.0",
+-    "description": "Task queue implementation with priority and retry logic",
+-    "main": "dist/queue.js",
+-    "scripts": {
+-        "build": "tsc"
+-    },
+-    "keywords": [],
+-    "author": "",
+-    "license": "ISC",
+-    "devDependencies": {
+-        "@types/node": "^20.11.0",
+-        "typescript": "^5.3.3"
+-    }
+-}
+\ No newline at end of file
+diff --git a/repository_before/src/queue.ts b/repository_after/src/queue.ts
+index d4005d4..095c69f 100644
+--- a/repository_before/src/queue.ts
++++ b/repository_after/src/queue.ts
+@@ -231,7 +231,7 @@ export class TaskQueue {
+ 
+         for (let i = 0; i < this.queue.length; i++) {
+             const existingTask = this.tasks.get(this.queue[i]);
+-            if (existingTask && task.priority > existingTask.priority) {
++            if (existingTask && task.priority < existingTask.priority) {
+                 this.queue.splice(i, 0, id);
+                 inserted = true;
+                 break;
+@@ -344,4 +344,4 @@ export class TaskQueue {
+ 
+         this.retryTimers.set(id, retryTimer);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/repository_after/tests/callbacks.test.ts b/repository_after/tests/callbacks.test.ts
+new file mode 100644
+index 0000000..2827f4e
+--- /dev/null
++++ b/repository_after/tests/callbacks.test.ts
+@@ -0,0 +1,124 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Callbacks', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('onTaskComplete should be called when task completes', async () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++    const completeCallback = jest.fn();
++
++    queue.onTaskComplete(completeCallback);
++    queue.enqueue({ handler, data: {} });
++
++    await jest.runAllTimersAsync();
++
++    expect(completeCallback).toHaveBeenCalledTimes(1);
++  });
++
++  test('callback should receive full task object with result', async () => {
++    queue = new TaskQueue();
++    const expectedResult = { value: 42 };
++    const handler = jest.fn().mockResolvedValue(expectedResult);
++    const completeCallback = jest.fn();
++
++    queue.onTaskComplete(completeCallback);
++    const taskId = queue.enqueue({ handler, data: {} });
++
++    await jest.runAllTimersAsync();
++
++    expect(completeCallback).toHaveBeenCalledWith(
++      expect.objectContaining({
++        id: taskId,
++        status: 'completed',
++        result: expectedResult
++      })
++    );
++  });
++
++  test('onTaskFailed should be called after retries exhausted', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    const handler = jest.fn().mockRejectedValue(new Error('Fail'));
++    const failedCallback = jest.fn();
++
++    queue.onTaskFailed(failedCallback);
++    queue.enqueue({ handler, data: {}, maxRetries: 2 });
++
++    await jest.runAllTimersAsync();
++
++    expect(failedCallback).toHaveBeenCalledTimes(1);
++  });
++
++  test('failed callback should contain final error', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    const error = new Error('Final error');
++    const handler = jest.fn().mockRejectedValue(error);
++    const failedCallback = jest.fn();
++
++    queue.onTaskFailed(failedCallback);
++    queue.enqueue({ handler, data: {}, maxRetries: 1 });
++
++    await jest.runAllTimersAsync();
++
++    expect(failedCallback).toHaveBeenCalledWith(
++      expect.objectContaining({
++        status: 'failed',
++        error: error
++      })
++    );
++  });
++
++  test('callback should NOT fire prematurely during retries', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    let attemptCount = 0;
++    const handler = jest.fn().mockImplementation(() => {
++      attemptCount++;
++      if (attemptCount < 3) {
++        return Promise.reject(new Error('Fail'));
++      }
++      return Promise.resolve('success');
++    });
++    const completeCallback = jest.fn();
++    const failedCallback = jest.fn();
++
++    queue.onTaskComplete(completeCallback);
++    queue.onTaskFailed(failedCallback);
++    queue.enqueue({ handler, data: {}, maxRetries: 5 });
++
++    await jest.runAllTimersAsync();
++
++    expect(completeCallback).toHaveBeenCalledTimes(1);
++    expect(failedCallback).not.toHaveBeenCalled();
++  });
++
++  test('onTaskFailed should be called for timed out tasks with no retries', async () => {
++    queue = new TaskQueue({ defaultTimeout: 1000 });
++    const handler = jest.fn().mockImplementation(() => {
++      return new Promise(resolve => setTimeout(resolve, 5000));
++    });
++    const failedCallback = jest.fn();
++
++    queue.onTaskFailed(failedCallback);
++    queue.enqueue({ handler, data: {}, maxRetries: 0 });
++
++    await jest.advanceTimersByTimeAsync(1000);
++
++    expect(failedCallback).toHaveBeenCalledWith(
++      expect.objectContaining({
++        status: 'timed_out'
++      })
++    );
++  });
++});
+diff --git a/repository_after/tests/concurrency.test.ts b/repository_after/tests/concurrency.test.ts
+new file mode 100644
+index 0000000..0b9ad84
+--- /dev/null
++++ b/repository_after/tests/concurrency.test.ts
+@@ -0,0 +1,104 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Concurrency', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('should not exceed maxConcurrency running tasks simultaneously', async () => {
++    queue = new TaskQueue({ maxConcurrency: 2 });
++    let maxConcurrent = 0;
++    let currentRunning = 0;
++
++    const handler = jest.fn().mockImplementation(async () => {
++      currentRunning++;
++      maxConcurrent = Math.max(maxConcurrent, currentRunning);
++      await new Promise(resolve => setTimeout(resolve, 100));
++      currentRunning--;
++      return 'result';
++    });
++
++    queue.enqueue({ handler, data: {} });
++    queue.enqueue({ handler, data: {} });
++    queue.enqueue({ handler, data: {} });
++    queue.enqueue({ handler, data: {} });
++
++    await jest.runAllTimersAsync();
++
++    expect(maxConcurrent).toBeLessThanOrEqual(2);
++  });
++
++  test('next queued task should start immediately after one completes', async () => {
++    queue = new TaskQueue({ maxConcurrency: 1 });
++    const executionTimes: number[] = [];
++
++    const handler = jest.fn().mockImplementation(async () => {
++      executionTimes.push(Date.now());
++      return 'result';
++    });
++
++    queue.enqueue({ handler, data: {} });
++    queue.enqueue({ handler, data: {} });
++
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalledTimes(2);
++    expect(executionTimes.length).toBe(2);
++  });
++
++  test('concurrency = 1 should enforce strict sequential execution', async () => {
++    queue = new TaskQueue({ maxConcurrency: 1 });
++    const executionOrder: number[] = [];
++    let currentlyExecuting = 0;
++
++    const createHandler = (id: number) => jest.fn().mockImplementation(async () => {
++      currentlyExecuting++;
++      expect(currentlyExecuting).toBe(1);
++      executionOrder.push(id);
++      await new Promise(resolve => setTimeout(resolve, 10));
++      currentlyExecuting--;
++      return 'result';
++    });
++
++    queue.enqueue({ handler: createHandler(1), data: {} });
++    queue.enqueue({ handler: createHandler(2), data: {} });
++    queue.enqueue({ handler: createHandler(3), data: {} });
++
++    await jest.runAllTimersAsync();
++
++    expect(executionOrder).toEqual([1, 2, 3]);
++  });
++
++  test('multiple fast tasks should not violate concurrency limit', async () => {
++    queue = new TaskQueue({ maxConcurrency: 3 });
++    let maxConcurrent = 0;
++    let currentRunning = 0;
++
++    const handler = jest.fn().mockImplementation(() => {
++      currentRunning++;
++      maxConcurrent = Math.max(maxConcurrent, currentRunning);
++      return Promise.resolve().then(() => {
++        currentRunning--;
++        return 'result';
++      });
++    });
++
++    for (let i = 0; i < 10; i++) {
++      queue.enqueue({ handler, data: {} });
++    }
++
++    await jest.runAllTimersAsync();
++
++    expect(maxConcurrent).toBeLessThanOrEqual(3);
++  });
++});
+diff --git a/repository_after/tests/control.test.ts b/repository_after/tests/control.test.ts
+new file mode 100644
+index 0000000..feb0ee8
+--- /dev/null
++++ b/repository_after/tests/control.test.ts
+@@ -0,0 +1,183 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Control (pause/resume/clear)', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  describe('pause/resume()', () => {
++    test('pause() should stop new task processing', async () => {
++      queue = new TaskQueue();
++      const handler = jest.fn().mockResolvedValue('result');
++
++      queue.pause();
++      queue.enqueue({ handler, data: {} });
++
++      await jest.advanceTimersByTimeAsync(1000);
++
++      expect(handler).not.toHaveBeenCalled();
++    });
++
++    test('running tasks should continue while paused', async () => {
++      queue = new TaskQueue({ maxConcurrency: 1 });
++      let firstTaskCompleted = false;
++
++      const firstHandler = jest.fn().mockImplementation(async () => {
++        await new Promise(resolve => setTimeout(resolve, 100));
++        firstTaskCompleted = true;
++        return 'first';
++      });
++
++      const secondHandler = jest.fn().mockResolvedValue('second');
++
++      queue.enqueue({ handler: firstHandler, data: {} });
++
++      await jest.advanceTimersByTimeAsync(10);
++      queue.pause();
++      queue.enqueue({ handler: secondHandler, data: {} });
++
++      await jest.runAllTimersAsync();
++
++      expect(firstTaskCompleted).toBe(true);
++      expect(secondHandler).not.toHaveBeenCalled();
++    });
++
++    test('resume() should restart processing of queued tasks', async () => {
++      queue = new TaskQueue();
++      const handler = jest.fn().mockResolvedValue('result');
++
++      queue.pause();
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++
++      await jest.advanceTimersByTimeAsync(1000);
++      expect(handler).not.toHaveBeenCalled();
++
++      queue.resume();
++      await jest.runAllTimersAsync();
++
++      expect(handler).toHaveBeenCalledTimes(2);
++    });
++
++    test('enqueue while paused should not auto-execute until resume', async () => {
++      queue = new TaskQueue();
++      const handler = jest.fn().mockResolvedValue('result');
++
++      queue.pause();
++      const taskId = queue.enqueue({ handler, data: {} });
++
++      await jest.advanceTimersByTimeAsync(1000);
++      expect(queue.getTask(taskId)?.status).toBe('pending');
++
++      queue.resume();
++      await jest.runAllTimersAsync();
++
++      expect(queue.getTask(taskId)?.status).toBe('completed');
++    });
++  });
++
++  describe('clear()', () => {
++    test('clear() should remove all pending tasks', () => {
++      queue = new TaskQueue();
++      queue.pause();
++      const handler = jest.fn().mockResolvedValue('result');
++
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++
++      expect(queue.getStats().pending).toBe(3);
++
++      queue.clear();
++
++      expect(queue.getStats().pending).toBe(0);
++      expect(queue.getStats().total).toBe(0);
++    });
++
++    test('clear() should NOT affect running tasks', async () => {
++      queue = new TaskQueue({ maxConcurrency: 1 });
++      let runningTaskCompleted = false;
++
++      const runningHandler = jest.fn().mockImplementation(async () => {
++        await new Promise(resolve => setTimeout(resolve, 100));
++        runningTaskCompleted = true;
++        return 'running';
++      });
++
++      const pendingHandler = jest.fn().mockResolvedValue('pending');
++
++      const runningId = queue.enqueue({ handler: runningHandler, data: {} });
++
++      await jest.advanceTimersByTimeAsync(10);
++
++      queue.enqueue({ handler: pendingHandler, data: {} });
++      queue.clear();
++
++      await jest.runAllTimersAsync();
++
++      expect(runningTaskCompleted).toBe(true);
++      expect(queue.getTask(runningId)?.status).toBe('completed');
++      expect(pendingHandler).not.toHaveBeenCalled();
++    });
++
++    test('stats pending count should reset after clear', () => {
++      queue = new TaskQueue();
++      queue.pause();
++      const handler = jest.fn().mockResolvedValue('result');
++
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++
++      expect(queue.getStats().pending).toBe(2);
++
++      queue.clear();
++
++      expect(queue.getStats().pending).toBe(0);
++    });
++
++    test('clear() should cancel retry timers for pending tasks', async () => {
++      queue = new TaskQueue({ defaultRetryBaseDelay: 1000 });
++      queue.pause(); // Pause to keep tasks pending
++      const handler = jest.fn().mockRejectedValue(new Error('Fail'));
++
++      queue.enqueue({ handler, data: {}, maxRetries: 3 });
++      queue.enqueue({ handler, data: {}, maxRetries: 3 });
++
++      // Clear while tasks are still pending
++      queue.clear();
++
++      queue.resume();
++      await jest.runAllTimersAsync();
++
++      // No tasks should execute after clear
++      expect(handler).not.toHaveBeenCalled();
++    });
++  });
++
++  describe('dispose()', () => {
++    test('dispose() should clear all timers and stop processing', async () => {
++      queue = new TaskQueue({ defaultRetryBaseDelay: 1000 });
++      const handler = jest.fn().mockRejectedValue(new Error('Fail'));
++
++      queue.enqueue({ handler, data: {}, maxRetries: 5 });
++
++      await jest.advanceTimersByTimeAsync(10);
++
++      queue.dispose();
++
++      await jest.runAllTimersAsync();
++
++      expect(handler).toHaveBeenCalledTimes(1);
++    });
++  });
++});
+diff --git a/repository_after/tests/edge-cases.test.ts b/repository_after/tests/edge-cases.test.ts
+new file mode 100644
+index 0000000..0aa495d
+--- /dev/null
++++ b/repository_after/tests/edge-cases.test.ts
+@@ -0,0 +1,158 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Edge Cases', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('priority inversion under heavy load should not occur', async () => {
++    queue = new TaskQueue({ maxConcurrency: 2 });
++    const executionOrder: number[] = [];
++
++    queue.pause();
++
++    for (let i = 0; i < 20; i++) {
++      const priority = (i % 5) + 1 as any;
++      queue.enqueue({
++        handler: () => {
++          executionOrder.push(priority);
++          return Promise.resolve();
++        },
++        data: {},
++        priority
++      });
++    }
++
++    queue.resume();
++    await jest.runAllTimersAsync();
++
++    for (let i = 0; i < executionOrder.length - 1; i++) {
++      expect(executionOrder[i]).toBeLessThanOrEqual(executionOrder[i + 1]);
++    }
++  });
++
++  test('synchronous handler failure should be caught', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    const handler = jest.fn().mockImplementation(() => {
++      throw new Error('Synchronous error');
++    });
++
++    const taskId = queue.enqueue({ handler, data: {}, maxRetries: 1 });
++
++    await jest.runAllTimersAsync();
++
++    const task = queue.getTask(taskId);
++    expect(task?.status).toBe('failed');
++    expect(task?.error?.message).toBe('Synchronous error');
++  });
++
++  test('non-Error object throws should be normalized', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    const handler = jest.fn().mockImplementation(() => {
++      throw 'String error';
++    });
++
++    const taskId = queue.enqueue({ handler, data: {}, maxRetries: 1 });
++
++    await jest.runAllTimersAsync();
++
++    const task = queue.getTask(taskId);
++    expect(task?.error).toBeInstanceOf(Error);
++    expect(task?.error?.message).toBe('String error');
++  });
++
++  test('multiple tasks with different priorities and retries', async () => {
++    queue = new TaskQueue({ maxConcurrency: 2, defaultRetryBaseDelay: 100 });
++    queue.pause(); // Pause to enqueue all first
++    const results: string[] = [];
++
++    let task1Attempts = 0;
++    const handler1 = jest.fn().mockImplementation(() => {
++      task1Attempts++;
++      if (task1Attempts < 2) {
++        return Promise.reject(new Error('Fail'));
++      }
++      results.push('task1-p1');
++      return Promise.resolve('task1');
++    });
++
++    const handler2 = jest.fn().mockImplementation(() => {
++      results.push('task2-p3');
++      return Promise.resolve('task2');
++    });
++
++    const handler3 = jest.fn().mockImplementation(() => {
++      results.push('task3-p2');
++      return Promise.resolve('task3');
++    });
++
++    queue.enqueue({ handler: handler1, data: {}, priority: 1, maxRetries: 3 });
++    queue.enqueue({ handler: handler2, data: {}, priority: 3 });
++    queue.enqueue({ handler: handler3, data: {}, priority: 2 });
++
++    queue.resume();
++    await jest.runAllTimersAsync();
++
++    // Verify all tasks completed
++    expect(results).toContain('task1-p1');
++    expect(results).toContain('task2-p3');
++    expect(results).toContain('task3-p2');
++    expect(handler1).toHaveBeenCalledTimes(2);
++  });
++
++  test('task data is passed correctly to handler', async () => {
++    queue = new TaskQueue();
++    const originalData = {
++      user: { id: 1, name: 'Test' },
++      items: [1, 2, 3]
++    };
++    const dataCopy = JSON.parse(JSON.stringify(originalData));
++
++    const handler = jest.fn().mockImplementation((data) => {
++      // Verify handler receives correct data
++      expect(data).toEqual(dataCopy);
++      return Promise.resolve('result');
++    });
++
++    queue.enqueue({ handler, data: originalData });
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalledWith(originalData);
++  });
++
++  test('concurrent tasks should respect priority even when running', async () => {
++    queue = new TaskQueue({ maxConcurrency: 2 });
++    queue.pause(); // Pause to enqueue all first
++    const executionOrder: number[] = [];
++
++    const createHandler = (priority: number) => jest.fn().mockImplementation(async () => {
++      executionOrder.push(priority);
++      await new Promise(resolve => setTimeout(resolve, 50));
++      return 'result';
++    });
++
++    queue.enqueue({ handler: createHandler(3), data: {}, priority: 3 });
++    queue.enqueue({ handler: createHandler(3), data: {}, priority: 3 });
++    queue.enqueue({ handler: createHandler(1), data: {}, priority: 1 });
++    queue.enqueue({ handler: createHandler(2), data: {}, priority: 2 });
++
++    queue.resume();
++    await jest.runAllTimersAsync();
++
++    // Verify all tasks executed
++    expect(executionOrder.length).toBe(4);
++    expect(executionOrder).toContain(1);
++    expect(executionOrder).toContain(2);
++    expect(executionOrder).toContain(3);
++  });
++});
+diff --git a/repository_after/tests/enqueue.test.ts b/repository_after/tests/enqueue.test.ts
+new file mode 100644
+index 0000000..58114d2
+--- /dev/null
++++ b/repository_after/tests/enqueue.test.ts
+@@ -0,0 +1,137 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - enqueue()', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('should enqueue task with default values', () => {
++    queue = new TaskQueue();
++    queue.pause(); // Pause to check initial state
++    const handler = jest.fn().mockResolvedValue('result');
++
++    const taskId = queue.enqueue({
++      handler,
++      data: { test: 'data' }
++    });
++
++    const task = queue.getTask(taskId);
++    expect(task).toBeDefined();
++    expect(task?.status).toBe('pending');
++    expect(task?.priority).toBe(3);
++    expect(task?.attempts).toBe(0);
++    expect(task?.maxRetries).toBe(3);
++  });
++
++  test('should return unique task ID for each enqueue', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    const id1 = queue.enqueue({ handler, data: {} });
++    const id2 = queue.enqueue({ handler, data: {} });
++    const id3 = queue.enqueue({ handler, data: {} });
++
++    expect(id1).not.toBe(id2);
++    expect(id2).not.toBe(id3);
++    expect(id1).not.toBe(id3);
++  });
++
++  test('should store task in internal map and be retrievable via getTask()', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++    const data = { userId: 123 };
++
++    const taskId = queue.enqueue({ handler, data });
++    const task = queue.getTask(taskId);
++
++    expect(task).toBeDefined();
++    expect(task?.id).toBe(taskId);
++    expect(task?.data).toEqual(data);
++  });
++
++  test('should set task status to pending initially', () => {
++    queue = new TaskQueue();
++    queue.pause(); // Pause to check initial state
++    const handler = jest.fn().mockResolvedValue('result');
++
++    const taskId = queue.enqueue({ handler, data: {} });
++    const task = queue.getTask(taskId);
++
++    expect(task?.status).toBe('pending');
++  });
++
++  test('should assign custom priority correctly', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    const taskId = queue.enqueue({
++      handler,
++      data: {},
++      priority: 1
++    });
++    const task = queue.getTask(taskId);
++
++    expect(task?.priority).toBe(1);
++  });
++
++  test('should use provided maxRetries instead of default', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    const taskId = queue.enqueue({
++      handler,
++      data: {},
++      maxRetries: 5
++    });
++    const task = queue.getTask(taskId);
++
++    expect(task?.maxRetries).toBe(5);
++  });
++
++  test('should validate handler receives correct data payload', async () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++    const data = { userId: 456, action: 'test' };
++
++    queue.enqueue({ handler, data });
++
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalledWith(data);
++  });
++
++  test('should not mutate original task data (deep object payload)', async () => {
++    queue = new TaskQueue();
++    const originalData = {
++      user: {
++        id: 1,
++        meta: {
++          roles: ['admin'],
++          settings: { theme: 'dark' }
++        }
++      }
++    };
++    const dataCopy = JSON.parse(JSON.stringify(originalData));
++
++    // Handler receives data correctly
++    const handler = jest.fn().mockImplementation((data) => {
++      expect(data).toEqual(dataCopy);
++      return Promise.resolve('result');
++    });
++
++    queue.enqueue({ handler, data: originalData });
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalled();
++  });
++});
+diff --git a/repository_after/tests/execution.test.ts b/repository_after/tests/execution.test.ts
+new file mode 100644
+index 0000000..6d3c1c5
+--- /dev/null
++++ b/repository_after/tests/execution.test.ts
+@@ -0,0 +1,113 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Task Execution', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('task transitions: pending → running → completed', async () => {
++    queue = new TaskQueue();
++    queue.pause(); // Pause to observe pending state
++    let resolver: any;
++    const handler = jest.fn().mockImplementation(() => {
++      return new Promise(resolve => {
++        resolver = resolve;
++      });
++    });
++
++    const taskId = queue.enqueue({ handler, data: {} });
++
++    expect(queue.getTask(taskId)?.status).toBe('pending');
++
++    queue.resume();
++    await jest.advanceTimersByTimeAsync(1);
++    expect(queue.getTask(taskId)?.status).toBe('running');
++
++    resolver('result');
++    await jest.runAllTimersAsync();
++    expect(queue.getTask(taskId)?.status).toBe('completed');
++  });
++
++  test('handler is automatically executed after enqueue', async () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    queue.enqueue({ handler, data: {} });
++
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalled();
++  });
++
++  test('task result is stored correctly on completion', async () => {
++    queue = new TaskQueue();
++    const expectedResult = { success: true, value: 42 };
++    const handler = jest.fn().mockResolvedValue(expectedResult);
++
++    const taskId = queue.enqueue({ handler, data: {} });
++
++    await jest.runAllTimersAsync();
++
++    const task = queue.getTask(taskId);
++    expect(task?.result).toEqual(expectedResult);
++  });
++
++  test('handler receives correct task data payload', async () => {
++    queue = new TaskQueue();
++    const data = { userId: 789, action: 'process' };
++    const handler = jest.fn().mockResolvedValue('result');
++
++    queue.enqueue({ handler, data });
++
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalledWith(data);
++  });
++
++  test('startedAt and completedAt timestamps are set properly', async () => {
++    queue = new TaskQueue();
++    queue.pause(); // Pause to check initial state
++    const handler = jest.fn().mockResolvedValue('result');
++
++    const taskId = queue.enqueue({ handler, data: {} });
++
++    const taskBefore = queue.getTask(taskId);
++    expect(taskBefore?.startedAt).toBeUndefined();
++    expect(taskBefore?.completedAt).toBeUndefined();
++
++    queue.resume();
++    await jest.runAllTimersAsync();
++
++    const taskAfter = queue.getTask(taskId);
++    expect(taskAfter?.startedAt).toBeInstanceOf(Date);
++    expect(taskAfter?.completedAt).toBeInstanceOf(Date);
++  });
++
++  test('running set is updated correctly during execution', async () => {
++    queue = new TaskQueue();
++    let isRunning = false;
++
++    const handler = jest.fn().mockImplementation(async () => {
++      const stats = queue.getStats();
++      isRunning = stats.running === 1;
++      return 'result';
++    });
++
++    queue.enqueue({ handler, data: {} });
++
++    await jest.runAllTimersAsync();
++
++    expect(isRunning).toBe(true);
++    expect(queue.getStats().running).toBe(0);
++  });
++});
+diff --git a/repository_after/tests/getters.test.ts b/repository_after/tests/getters.test.ts
+new file mode 100644
+index 0000000..6f98663
+--- /dev/null
++++ b/repository_after/tests/getters.test.ts
+@@ -0,0 +1,172 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Getters (getTask & getStats)', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  describe('getTask()', () => {
++    test('should return correct task by ID', () => {
++      queue = new TaskQueue();
++      queue.pause();
++      const handler = jest.fn().mockResolvedValue('result');
++      const data = { test: 'data' };
++
++      const taskId = queue.enqueue({ handler, data });
++      const task = queue.getTask(taskId);
++
++      expect(task).toBeDefined();
++      expect(task?.id).toBe(taskId);
++      expect(task?.data).toEqual(data);
++    });
++
++    test('should return undefined for non-existent ID', () => {
++      queue = new TaskQueue();
++
++      const task = queue.getTask('non-existent-id');
++
++      expect(task).toBeUndefined();
++    });
++
++    test('should reflect live task status changes (pending → running → completed)', async () => {
++      queue = new TaskQueue();
++      queue.pause(); // Pause to observe pending state
++      let resolver: any;
++      const handler = jest.fn().mockImplementation(() => {
++        return new Promise(resolve => {
++          resolver = resolve;
++        });
++      });
++
++      const taskId = queue.enqueue({ handler, data: {} });
++
++      expect(queue.getTask(taskId)?.status).toBe('pending');
++
++      queue.resume();
++      await jest.advanceTimersByTimeAsync(1);
++      expect(queue.getTask(taskId)?.status).toBe('running');
++
++      resolver('result');
++      await jest.runAllTimersAsync();
++      expect(queue.getTask(taskId)?.status).toBe('completed');
++    });
++
++    test('should include result and error fields correctly', async () => {
++      queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++      const successHandler = jest.fn().mockResolvedValue('success result');
++      const failHandler = jest.fn().mockRejectedValue(new Error('fail error'));
++
++      const successId = queue.enqueue({ handler: successHandler, data: {} });
++      const failId = queue.enqueue({ handler: failHandler, data: {}, maxRetries: 1 });
++
++      await jest.runAllTimersAsync();
++
++      expect(queue.getTask(successId)?.result).toBe('success result');
++      expect(queue.getTask(successId)?.error).toBeUndefined();
++
++      expect(queue.getTask(failId)?.error).toBeInstanceOf(Error);
++      expect(queue.getTask(failId)?.error?.message).toBe('fail error');
++    });
++  });
++
++  describe('getStats()', () => {
++    test('should return accurate pending count', () => {
++      queue = new TaskQueue();
++      queue.pause();
++      const handler = jest.fn().mockResolvedValue('result');
++
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++
++      const stats = queue.getStats();
++      expect(stats.pending).toBe(3);
++      expect(stats.total).toBe(3);
++    });
++
++    test('should return accurate running count during execution', async () => {
++      queue = new TaskQueue({ maxConcurrency: 2 });
++      let statsSnapshot: any;
++
++      const handler = jest.fn().mockImplementation(async () => {
++        statsSnapshot = queue.getStats();
++        await new Promise(resolve => setTimeout(resolve, 100));
++        return 'result';
++      });
++
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++
++      await jest.advanceTimersByTimeAsync(10);
++
++      expect(statsSnapshot.running).toBe(2);
++    });
++
++    test('should update completed count after success', async () => {
++      queue = new TaskQueue();
++      const handler = jest.fn().mockResolvedValue('result');
++
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++
++      await jest.runAllTimersAsync();
++
++      const stats = queue.getStats();
++      expect(stats.completed).toBe(2);
++      expect(stats.total).toBe(2);
++    });
++
++    test('should update failed count after retries exhausted', async () => {
++      queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++      const handler = jest.fn().mockRejectedValue(new Error('Fail'));
++
++      queue.enqueue({ handler, data: {}, maxRetries: 2 });
++
++      await jest.runAllTimersAsync();
++
++      const stats = queue.getStats();
++      expect(stats.failed).toBe(1);
++    });
++
++    test('should update timedOut count correctly', async () => {
++      queue = new TaskQueue({ defaultTimeout: 1000 });
++
++      const handler = jest.fn().mockImplementation(() => {
++        return new Promise(resolve => setTimeout(resolve, 5000));
++      });
++
++      queue.enqueue({ handler, data: {}, maxRetries: 0 });
++
++      await jest.advanceTimersByTimeAsync(1000);
++
++      const stats = queue.getStats();
++      expect(stats.timedOut).toBe(1);
++    });
++
++    test('total count should match number of tasks added', async () => {
++      queue = new TaskQueue();
++      const handler = jest.fn().mockResolvedValue('result');
++
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++      queue.enqueue({ handler, data: {} });
++
++      await jest.runAllTimersAsync();
++
++      const stats = queue.getStats();
++      expect(stats.total).toBe(5);
++    });
++  });
++});
+diff --git a/repository_after/tests/priority.test.ts b/repository_after/tests/priority.test.ts
+new file mode 100644
+index 0000000..36c1767
+--- /dev/null
++++ b/repository_after/tests/priority.test.ts
+@@ -0,0 +1,154 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Priority Ordering', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('high-priority task (1) executes before low-priority task (5)', async () => {
++    queue = new TaskQueue({ maxConcurrency: 1 });
++    queue.pause(); // Pause to enqueue both before execution
++    const executionOrder: number[] = [];
++
++    const lowPriorityHandler = jest.fn().mockImplementation(() => {
++      executionOrder.push(5);
++      return Promise.resolve('low');
++    });
++
++    const highPriorityHandler = jest.fn().mockImplementation(() => {
++      executionOrder.push(1);
++      return Promise.resolve('high');
++    });
++
++    queue.enqueue({ handler: lowPriorityHandler, data: {}, priority: 5 });
++    queue.enqueue({ handler: highPriorityHandler, data: {}, priority: 1 });
++
++    queue.resume();
++    await jest.runAllTimersAsync();
++
++    expect(executionOrder).toEqual([1, 5]);
++  });
++
++  test('FIFO ordering for equal priority tasks', async () => {
++    queue = new TaskQueue({ maxConcurrency: 1 });
++    const executionOrder: string[] = [];
++
++    const handler1 = jest.fn().mockImplementation(() => {
++      executionOrder.push('first');
++      return Promise.resolve('1');
++    });
++
++    const handler2 = jest.fn().mockImplementation(() => {
++      executionOrder.push('second');
++      return Promise.resolve('2');
++    });
++
++    const handler3 = jest.fn().mockImplementation(() => {
++      executionOrder.push('third');
++      return Promise.resolve('3');
++    });
++
++    queue.enqueue({ handler: handler1, data: {}, priority: 3 });
++    queue.enqueue({ handler: handler2, data: {}, priority: 3 });
++    queue.enqueue({ handler: handler3, data: {}, priority: 3 });
++
++    await jest.runAllTimersAsync();
++
++    expect(executionOrder).toEqual(['first', 'second', 'third']);
++  });
++
++  test('high-priority task added after low-priority tasks must execute first when capacity available', async () => {
++    queue = new TaskQueue({ maxConcurrency: 1 });
++    const executionOrder: number[] = [];
++
++    queue.pause();
++
++    queue.enqueue({
++      handler: () => { executionOrder.push(5); return Promise.resolve(); },
++      data: {},
++      priority: 5
++    });
++    queue.enqueue({
++      handler: () => { executionOrder.push(4); return Promise.resolve(); },
++      data: {},
++      priority: 4
++    });
++    queue.enqueue({
++      handler: () => { executionOrder.push(1); return Promise.resolve(); },
++      data: {},
++      priority: 1
++    });
++
++    queue.resume();
++    await jest.runAllTimersAsync();
++
++    expect(executionOrder).toEqual([1, 4, 5]);
++  });
++
++  test('priority ordering maintained under load (many queued tasks)', async () => {
++    queue = new TaskQueue({ maxConcurrency: 1 });
++    const executionOrder: number[] = [];
++
++    queue.pause();
++
++    for (let i = 0; i < 10; i++) {
++      const priority = (i % 5) + 1 as any;
++      queue.enqueue({
++        handler: () => { executionOrder.push(priority); return Promise.resolve(); },
++        data: {},
++        priority
++      });
++    }
++
++    queue.resume();
++    await jest.runAllTimersAsync();
++
++    for (let i = 0; i < executionOrder.length - 1; i++) {
++      expect(executionOrder[i]).toBeLessThanOrEqual(executionOrder[i + 1]);
++    }
++  });
++
++  test('retried high-priority task should re-enter queue respecting priority', async () => {
++    queue = new TaskQueue({ maxConcurrency: 1, defaultRetryBaseDelay: 100 });
++    queue.pause(); // Pause initially
++    const executionOrder: string[] = [];
++    let failCount = 0;
++
++    const highPriorityHandler = jest.fn().mockImplementation(() => {
++      executionOrder.push('high-priority');
++      if (failCount === 0) {
++        failCount++;
++        return Promise.reject(new Error('Fail once'));
++      }
++      return Promise.resolve('success');
++    });
++
++    const lowPriorityHandler = jest.fn().mockImplementation(() => {
++      executionOrder.push('low-priority');
++      return Promise.resolve('low');
++    });
++
++    queue.enqueue({ handler: highPriorityHandler, data: {}, priority: 1 });
++    queue.enqueue({ handler: lowPriorityHandler, data: {}, priority: 5 });
++
++    queue.resume();
++    await jest.runAllTimersAsync();
++
++    // High priority executes first, fails, then retries
++    expect(executionOrder[0]).toBe('high-priority');
++    // Verify both tasks completed
++    expect(executionOrder).toContain('high-priority');
++    expect(executionOrder).toContain('low-priority');
++    expect(highPriorityHandler).toHaveBeenCalledTimes(2);
++  });
++});
+diff --git a/repository_after/tests/retry.test.ts b/repository_after/tests/retry.test.ts
+new file mode 100644
+index 0000000..fddc12d
+--- /dev/null
++++ b/repository_after/tests/retry.test.ts
+@@ -0,0 +1,175 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Retry Logic', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('failed task should retry until maxRetries is reached', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    const handler = jest.fn().mockRejectedValue(new Error('Always fails'));
++
++    const taskId = queue.enqueue({ handler, data: {}, maxRetries: 3 });
++
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalledTimes(3);
++    expect(queue.getTask(taskId)?.status).toBe('failed');
++  });
++
++  test('should NOT exceed maxRetries attempts', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    const handler = jest.fn().mockRejectedValue(new Error('Fail'));
++
++    queue.enqueue({ handler, data: {}, maxRetries: 2 });
++
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalledTimes(2);
++    expect(handler).not.toHaveBeenCalledTimes(3);
++  });
++
++  test('exponential backoff delay = baseDelay * 2^(attempts - 1)', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 1000 });
++    const handler = jest.fn().mockRejectedValue(new Error('Fail'));
++    const retryTimes: number[] = [];
++
++    handler.mockImplementation(() => {
++      retryTimes.push(Date.now());
++      return Promise.reject(new Error('Fail'));
++    });
++
++    queue.enqueue({ handler, data: {}, maxRetries: 3 });
++
++    await jest.advanceTimersByTimeAsync(1);
++    expect(retryTimes.length).toBe(1);
++
++    await jest.advanceTimersByTimeAsync(1000);
++    expect(retryTimes.length).toBe(2);
++
++    await jest.advanceTimersByTimeAsync(2000);
++    expect(retryTimes.length).toBe(3);
++
++    await jest.runAllTimersAsync();
++  });
++
++  test('task succeeding on retry should be marked completed with correct attempts', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    let attemptCount = 0;
++
++    const handler = jest.fn().mockImplementation(() => {
++      attemptCount++;
++      if (attemptCount < 3) {
++        return Promise.reject(new Error('Fail'));
++      }
++      return Promise.resolve('success');
++    });
++
++    const taskId = queue.enqueue({ handler, data: {}, maxRetries: 5 });
++
++    await jest.runAllTimersAsync();
++
++    const task = queue.getTask(taskId);
++    expect(task?.status).toBe('completed');
++    expect(task?.attempts).toBe(3);
++    expect(task?.result).toBe('success');
++  });
++
++  test('task exhausting retries should be marked as failed with last error recorded', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    const lastError = new Error('Final failure');
++    let attemptCount = 0;
++
++    const handler = jest.fn().mockImplementation(() => {
++      attemptCount++;
++      if (attemptCount === 3) {
++        return Promise.reject(lastError);
++      }
++      return Promise.reject(new Error('Earlier failure'));
++    });
++
++    const taskId = queue.enqueue({ handler, data: {}, maxRetries: 3 });
++
++    await jest.runAllTimersAsync();
++
++    const task = queue.getTask(taskId);
++    expect(task?.status).toBe('failed');
++    expect(task?.error).toBe(lastError);
++    expect(task?.attempts).toBe(3);
++  });
++
++  test('retry should reset task status back to pending before re-queue', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100, maxConcurrency: 1 });
++    let attemptCount = 0;
++
++    const handler = jest.fn().mockImplementation(() => {
++      attemptCount++;
++      if (attemptCount === 1) {
++        return Promise.reject(new Error('Fail'));
++      }
++      return Promise.resolve('success');
++    });
++
++    const taskId = queue.enqueue({ handler, data: {} });
++
++    await jest.advanceTimersByTimeAsync(50);
++    expect(queue.getTask(taskId)?.status).toBe('pending');
++
++    await jest.runAllTimersAsync();
++  });
++
++  test('zero-delay retry should not cause infinite loop', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 0 });
++    const handler = jest.fn().mockRejectedValue(new Error('Fail'));
++
++    queue.enqueue({ handler, data: {}, maxRetries: 3 });
++
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalledTimes(3);
++  });
++
++  test('exponential backoff timing is strictly enforced', async () => {
++    queue = new TaskQueue({ defaultRetryBaseDelay: 100 });
++    const handler = jest.fn().mockRejectedValue(new Error('Fail'));
++    const callTimes: number[] = [];
++
++    handler.mockImplementation(() => {
++      callTimes.push(Date.now());
++      return Promise.reject(new Error('Fail'));
++    });
++
++    queue.enqueue({ handler, data: {}, maxRetries: 4 });
++
++    // First attempt
++    await jest.advanceTimersByTimeAsync(1);
++    expect(handler).toHaveBeenCalledTimes(1);
++
++    // Second attempt after 100ms (baseDelay * 2^0)
++    await jest.advanceTimersByTimeAsync(100);
++    expect(handler).toHaveBeenCalledTimes(2);
++    expect(callTimes[1] - callTimes[0]).toBe(100);
++
++    // Third attempt after 200ms (baseDelay * 2^1)
++    await jest.advanceTimersByTimeAsync(200);
++    expect(handler).toHaveBeenCalledTimes(3);
++    expect(callTimes[2] - callTimes[1]).toBe(200);
++
++    // Fourth attempt after 400ms (baseDelay * 2^2)
++    await jest.advanceTimersByTimeAsync(400);
++    expect(handler).toHaveBeenCalledTimes(4);
++    expect(callTimes[3] - callTimes[2]).toBe(400);
++
++    await jest.runAllTimersAsync();
++  });
++});
+diff --git a/repository_after/tests/timeout.test.ts b/repository_after/tests/timeout.test.ts
+new file mode 100644
+index 0000000..6b7c07e
+--- /dev/null
++++ b/repository_after/tests/timeout.test.ts
+@@ -0,0 +1,169 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Timeout Handling', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('task exceeding defaultTimeout should be marked as timed_out', async () => {
++    queue = new TaskQueue({ defaultTimeout: 1000 });
++
++    const handler = jest.fn().mockImplementation(() => {
++      return new Promise(resolve => setTimeout(resolve, 5000));
++    });
++
++    const taskId = queue.enqueue({ handler, data: {}, maxRetries: 0 });
++
++    await jest.advanceTimersByTimeAsync(1000);
++
++    const task = queue.getTask(taskId);
++    expect(task?.status).toBe('timed_out');
++  });
++
++  test('timed-out task should trigger retry if retries remain', async () => {
++    queue = new TaskQueue({ defaultTimeout: 1000, defaultRetryBaseDelay: 500 });
++    let callCount = 0;
++
++    const handler = jest.fn().mockImplementation(() => {
++      callCount++;
++      if (callCount === 1) {
++        // First call times out
++        return new Promise(resolve => setTimeout(resolve, 5000));
++      }
++      // Second call succeeds quickly
++      return Promise.resolve('success');
++    });
++
++    const taskId = queue.enqueue({ handler, data: {}, maxRetries: 2 });
++
++    // First attempt times out
++    await jest.advanceTimersByTimeAsync(1000);
++    expect(handler).toHaveBeenCalledTimes(1);
++
++    // Wait for retry delay
++    await jest.advanceTimersByTimeAsync(500);
++
++    // Second attempt completes
++    await jest.runAllTimersAsync();
++
++    expect(handler).toHaveBeenCalledTimes(2);
++    expect(queue.getTask(taskId)?.status).toBe('completed');
++  });
++
++  test('timeout timer should be cleared when task completes early', async () => {
++    queue = new TaskQueue({ defaultTimeout: 5000 });
++
++    const handler = jest.fn().mockResolvedValue('quick result');
++
++    const taskId = queue.enqueue({ handler, data: {} });
++
++    await jest.runAllTimersAsync();
++
++    const task = queue.getTask(taskId);
++    expect(task?.status).toBe('completed');
++    expect(task?.status).not.toBe('timed_out');
++  });
++
++  test('task that resolves AFTER timeout should NOT overwrite timed_out state', async () => {
++    queue = new TaskQueue({ defaultTimeout: 1000 });
++    let resolver: any;
++
++    const handler = jest.fn().mockImplementation(() => {
++      return new Promise(resolve => {
++        resolver = resolve;
++      });
++    });
++
++    const taskId = queue.enqueue({ handler, data: {}, maxRetries: 0 });
++
++    await jest.advanceTimersByTimeAsync(1000);
++    expect(queue.getTask(taskId)?.status).toBe('timed_out');
++
++    resolver('late result');
++    await jest.runAllTimersAsync();
++
++    expect(queue.getTask(taskId)?.status).toBe('timed_out');
++  });
++
++  test('running set should remove timed-out task (leak prevention)', async () => {
++    queue = new TaskQueue({ defaultTimeout: 1000 });
++
++    const handler = jest.fn().mockImplementation(() => {
++      return new Promise(resolve => setTimeout(resolve, 5000));
++    });
++
++    queue.enqueue({ handler, data: {}, maxRetries: 0 });
++
++    await jest.advanceTimersByTimeAsync(500);
++    expect(queue.getStats().running).toBe(1);
++
++    await jest.advanceTimersByTimeAsync(500);
++    expect(queue.getStats().running).toBe(0);
++  });
++
++  test('running set must be cleaned immediately on timeout', async () => {
++    queue = new TaskQueue({ defaultTimeout: 1000, maxConcurrency: 1 });
++    const firstHandler = jest.fn().mockImplementation(() => {
++      return new Promise(resolve => setTimeout(resolve, 5000));
++    });
++    const secondHandler = jest.fn().mockResolvedValue('quick');
++
++    // First task will timeout
++    queue.enqueue({ handler: firstHandler, data: {}, maxRetries: 0 });
++
++    // Second task should be able to start after first times out
++    queue.enqueue({ handler: secondHandler, data: {}, maxRetries: 0 });
++
++    // First task starts
++    await jest.advanceTimersByTimeAsync(1);
++    expect(firstHandler).toHaveBeenCalledTimes(1);
++    expect(secondHandler).toHaveBeenCalledTimes(0);
++
++    // First task times out
++    await jest.advanceTimersByTimeAsync(1000);
++
++    // Second task MUST start immediately after first times out
++    // If running set wasn't cleaned, second task won't start due to concurrency limit
++    await jest.advanceTimersByTimeAsync(1);
++    expect(secondHandler).toHaveBeenCalledTimes(1);
++  });
++
++  test('multiple timed-out tasks all cleaned from running set', async () => {
++    queue = new TaskQueue({ defaultTimeout: 1000, maxConcurrency: 2 });
++    const slowHandler = jest.fn().mockImplementation(() => {
++      return new Promise(resolve => setTimeout(resolve, 5000));
++    });
++    const fastHandler = jest.fn().mockResolvedValue('done');
++
++    // Two tasks that will timeout
++    queue.enqueue({ handler: slowHandler, data: {}, maxRetries: 0 });
++    queue.enqueue({ handler: slowHandler, data: {}, maxRetries: 0 });
++
++    // Two tasks that should run after timeouts
++    queue.enqueue({ handler: fastHandler, data: {}, maxRetries: 0 });
++    queue.enqueue({ handler: fastHandler, data: {}, maxRetries: 0 });
++
++    // First two start
++    await jest.advanceTimersByTimeAsync(1);
++    expect(slowHandler).toHaveBeenCalledTimes(2);
++    expect(fastHandler).toHaveBeenCalledTimes(0);
++
++    // Both timeout
++    await jest.advanceTimersByTimeAsync(1000);
++
++    // Next two MUST start immediately
++    // If running set wasn't cleaned, they won't start due to concurrency limit
++    await jest.advanceTimersByTimeAsync(1);
++    expect(fastHandler).toHaveBeenCalledTimes(2);
++  });
++});
+diff --git a/repository_after/tests/validation.test.ts b/repository_after/tests/validation.test.ts
+new file mode 100644
+index 0000000..e587f88
+--- /dev/null
++++ b/repository_after/tests/validation.test.ts
+@@ -0,0 +1,86 @@
++import { TaskQueue } from '../src/queue';
++
++describe('TaskQueue - Validation & Error Handling', () => {
++  let queue: TaskQueue;
++
++  beforeEach(() => {
++    jest.useFakeTimers();
++  });
++
++  afterEach(() => {
++    if (queue) {
++      queue.dispose();
++    }
++    jest.clearAllTimers();
++    jest.useRealTimers();
++  });
++
++  test('should throw if handler is missing', () => {
++    queue = new TaskQueue();
++
++    expect(() => {
++      queue.enqueue({ data: {} } as any);
++    }).toThrow('Task handler must be a function');
++  });
++
++  test('should throw if handler is not a function', () => {
++    queue = new TaskQueue();
++
++    expect(() => {
++      queue.enqueue({ handler: 'not a function', data: {} } as any);
++    }).toThrow('Task handler must be a function');
++  });
++
++  test('should throw if priority < 1', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    expect(() => {
++      queue.enqueue({ handler, data: {}, priority: 0 as any });
++    }).toThrow('Priority must be an integer between 1 and 5');
++  });
++
++  test('should throw if priority > 5', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    expect(() => {
++      queue.enqueue({ handler, data: {}, priority: 6 as any });
++    }).toThrow('Priority must be an integer between 1 and 5');
++  });
++
++  test('should throw if priority is non-integer', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    expect(() => {
++      queue.enqueue({ handler, data: {}, priority: 2.5 as any });
++    }).toThrow('Priority must be an integer between 1 and 5');
++  });
++
++  test('should throw if maxRetries is negative', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    expect(() => {
++      queue.enqueue({ handler, data: {}, maxRetries: -1 });
++    }).toThrow('maxRetries must be a non-negative integer');
++  });
++
++  test('should throw when enqueue is called after dispose()', () => {
++    queue = new TaskQueue();
++    const handler = jest.fn().mockResolvedValue('result');
++
++    queue.dispose();
++
++    expect(() => {
++      queue.enqueue({ handler, data: {} });
++    }).toThrow('Cannot enqueue tasks on a disposed queue');
++  });
++
++  test('constructor with maxConcurrency = 0 should throw', () => {
++    expect(() => {
++      new TaskQueue({ maxConcurrency: 0 });
++    }).toThrow('maxConcurrency must be at least 1');
++  });
++});

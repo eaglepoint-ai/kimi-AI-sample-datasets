@@ -1,0 +1,10 @@
+{
+  "instance_id": "IMKWHD",
+  "problem_statement": "Threads of hydrogen and oxygen must synchronize to form water molecules. Each molecule requires one oxygen and two hydrogen threads. Threads wait at a barrier until a complete set is ready, then pass together using releaseHydrogen() and releaseOxygen(). All molecules must form in complete groups, respecting the 1:2 oxygen-to-hydrogen ratio.",
+  "base_commit": "repository_before/",
+  "test_patch": "tests/",
+  "github_url": "https://github.com/eaglepoint-ai/kimi-AI-sample-datasets/tree/main/imkwhd-h-o-thread-synchronization",
+  "environment_setup": "Dockerfile",
+  "FAIL_TO_PASS": [],
+  "PASS_TO_PASS": []
+}

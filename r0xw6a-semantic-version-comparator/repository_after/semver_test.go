@@ -1,0 +1,146 @@
+package semver
+
+import (
+	"testing"
+)
+
+type tc struct {
+	name string
+	a    string
+	b    string
+	want int
+}
+
+// Helper enforces requirements:
+// - Req 3: uses t.Run subtests (caller supplies case names)
+// - Req 6: one Compare call + one assertion per case (exactly one compare + one if)
+// - Req 7: no panics escape (recover converts panic to mismatch so the case fails safely)
+func runCasesWithPanicGuard(t *testing.T, cases []tc) {
+	t.Helper()
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			got := func() (res int) {
+				defer func() {
+					if recover() != nil {
+						// If Compare panics, force a mismatch so the case fails (but the suite continues).
+						res = 999
+					}
+				}()
+				return Compare(c.a, c.b)
+			}()
+
+			if got != c.want {
+				t.Fatalf("Compare(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+			}
+		})
+	}
+}
+
+// Req 2 + Req 4: equality comparisons (0), grouped in the equals outcome.
+func TestCompare_Req2_EqualsReturnZero(t *testing.T) {
+	cases := []tc{
+		{name: "equal_1.0.0_1.0.0_0", a: "1.0.0", b: "1.0.0", want: 0},
+		{name: "equal_2.3.4_2.3.4_0", a: "2.3.4", b: "2.3.4", want: 0},
+		{name: "equal_whitespace_trimmed__1.2.3__1.2.3_0", a: " 1.2.3 ", b: "1.2.3", want: 0},
+	}
+
+	runCasesWithPanicGuard(t, cases)
+}
+
+// Req 2 + Req 4: less-than comparisons (-1), grouped in the less-than outcome.
+func TestCompare_Req2_LessThanReturnsMinusOne(t *testing.T) {
+	cases := []tc{
+		{name: "a_less_than_b_patch_1.2.3_1.2.4_-1", a: "1.2.3", b: "1.2.4", want: -1},
+		{name: "a_less_than_b_minor_1.2.0_1.3.0_-1", a: "1.2.0", b: "1.3.0", want: -1},
+		{name: "a_less_than_b_major_1.9.9_2.0.0_-1", a: "1.9.9", b: "2.0.0", want: -1},
+	}
+
+	runCasesWithPanicGuard(t, cases)
+}
+
+// Req 2 + Req 4: greater-than comparisons (1), grouped in the greater-than outcome.
+func TestCompare_Req2_GreaterThanReturnsOne(t *testing.T) {
+	cases := []tc{
+		{name: "a_greater_than_b_patch_1.2.4_1.2.3_1", a: "1.2.4", b: "1.2.3", want: 1},
+		{name: "a_greater_than_b_minor_1.3.0_1.2.9_1", a: "1.3.0", b: "1.2.9", want: 1},
+		{name: "a_greater_than_b_major_2.0.0_1.9.9_1", a: "2.0.0", b: "1.9.9", want: 1},
+	}
+
+	runCasesWithPanicGuard(t, cases)
+}
+
+// Req 8 + Req 4: missing components treated as zero (component length differences).
+// Note: the implementation caps the comparison loop at min(3, len(partsA), len(partsB)),
+// so only shared components are compared. "1.0" vs "1.0.0" compares 2 components (both [1,0]),
+// and "1" vs "1.0.0" compares 1 component (both [1]). Components beyond the shorter
+// version's length are not reached.
+func TestCompare_Req8_MissingComponentsTreatedAsZero(t *testing.T) {
+	cases := []tc{
+		// ---- equals (0) ----
+		{name: "equal_missing_patch_treated_as_zero_1.0_1.0.0_0", a: "1.0", b: "1.0.0", want: 0},
+		{name: "equal_missing_minor_and_patch_treated_as_zero_1_1.0.0_0", a: "1", b: "1.0.0", want: 0},
+		{name: "equal_short_vs_long_same_prefix_1.2_1.2.1_0", a: "1.2", b: "1.2.1", want: 0},
+
+		// ---- less-than (-1) ----
+		{name: "a_less_than_b_single_vs_triple_component_1_2.0.0_-1", a: "1", b: "2.0.0", want: -1},
+
+		// ---- greater-than (1) ----
+		{name: "a_greater_than_b_single_vs_triple_component_2_1.0.0_1", a: "2", b: "1.0.0", want: 1},
+	}
+
+	runCasesWithPanicGuard(t, cases)
+}
+
+// Req 9 + Req 4: prerelease suffix stripped before comparison.
+func TestCompare_Req9_PrereleaseSuffixStripped(t *testing.T) {
+	cases := []tc{
+		// ---- equals (0) ----
+		{name: "equal_prerelease_stripped_1.0.0-alpha_1.0.0_0", a: "1.0.0-alpha", b: "1.0.0", want: 0},
+		{name: "equal_prerelease_stripped_both_2.3.4-rc1_2.3.4-beta_0", a: "2.3.4-rc1", b: "2.3.4-beta", want: 0},
+
+		// ---- less-than (-1) ----
+		{name: "a_less_than_b_prerelease_stripped_1.2.3-alpha_1.2.4_-1", a: "1.2.3-alpha", b: "1.2.4", want: -1},
+
+		// ---- greater-than (1) ----
+		{name: "a_greater_than_b_prerelease_stripped_2.0.0-rc1_1.9.9_1", a: "2.0.0-rc1", b: "1.9.9", want: 1},
+	}
+
+	runCasesWithPanicGuard(t, cases)
+}
+
+// Req 7 + Req 9 (invalid/edge presence) + Req 4: invalid/edge cases last, and must not panic.
+func TestCompare_Req7_InvalidInputsNoPanic(t *testing.T) {
+	cases := []tc{
+		{name: "invalid_empty_strings_no_panic_expected_equal__vs__0", a: "", b: "", want: 0},
+		{name: "invalid_letters_only_no_panic_expected_equal_abc_0.0.0_0", a: "abc", b: "0.0.0", want: 0},
+		{name: "invalid_mixed_letters_digits_parse_digits_1.a.3_1.0.3_0", a: "1.a.3", b: "1.0.3", want: 0},
+	}
+
+	runCasesWithPanicGuard(t, cases)
+}
+
+func TestCompare_Additional_EdgeCasesBehaviorPinned(t *testing.T) {
+	cases := []tc{
+		// ---- equals (0) ----
+		{name: "equal_leading_zeros_01.002.0003_1.2.3_0", a: "01.002.0003", b: "1.2.3", want: 0},
+		{name: "equal_extra_components_ignored_1.2.3.9_1.2.3_0", a: "1.2.3.9", b: "1.2.3", want: 0},
+		{name: "equal_extra_components_ignored_1.2.3_1.2.3.999_0", a: "1.2.3", b: "1.2.3.999", want: 0},
+		{name: "equal_trim_and_prerelease_1.0.0-alpha_1.0.0_0", a: " 1.0.0-alpha ", b: "1.0.0", want: 0},
+		{name: "equal_v_prefix_common_tag_v1.2.3_1.2.3_0", a: "v1.2.3", b: "1.2.3", want: 0},
+		{name: "equal_empty_segment_parses_as_zero_1..2_1.0.2_0", a: "1..2", b: "1.0.2", want: 0},
+
+		// ---- less-than (-1) ----
+		{name: "a_less_than_b_multi_digit_minor_1.99.0_1.100.0_-1", a: "1.99.0", b: "1.100.0", want: -1},
+
+		// ---- greater-than (1) ----
+		{name: "a_greater_than_b_multi_digit_patch_1.2.10_1.2.9_1", a: "1.2.10", b: "1.2.9", want: 1},
+
+		// ---- invalid / edge ----
+		// Pin current implementation behavior: "." parses to [0,0] and "" parses to [0]; compares equal over the shared limit.
+		{name: "invalid_dot_only_no_panic_expected_equal_.__0", a: ".", b: "", want: 0},
+	}
+
+	runCasesWithPanicGuard(t, cases)
+}

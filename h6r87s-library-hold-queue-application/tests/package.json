@@ -1,0 +1,34 @@
+{
+  "name": "tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:backend": "vitest run backend",
+    "test:ui": "vitest run ui",
+    "test:e2e": "npx playwright test -c e2e/playwright.config.ts",
+    "test:integration": "vitest run integration",
+    "test:unit:backend": "vitest run backend/unit",
+    "test:all": "vitest run --reporter=default --reporter=json --outputFile=.reports/report.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^22.0.0",
+    "@types/supertest": "^6.0.2",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.0.1",
+    "@testing-library/user-event": "^14.5.2",
+    "jsdom": "^25.0.1",
+    "msw": "^2.4.11",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "supertest": "^7.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5",
+    "express": "^4.19.2",
+    "@types/express": "^4.17.21"
+  }
+}

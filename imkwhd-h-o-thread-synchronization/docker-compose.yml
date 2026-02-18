@@ -1,0 +1,12 @@
+services:
+  before:
+    build: .
+    command: bash -c "javac -cp repository_before tests/H2OTest.java repository_before/H2O.java && java -cp repository_before:tests H2OTest"
+  after:
+    build: .
+    command: bash -c "javac -cp repository_after tests/H2OTest.java repository_after/H2O.java && java -cp repository_after:tests H2OTest"
+  evaluation:
+    build: .
+    command: bash -c "javac -d /tmp evaluation/Evaluate.java && java -cp /tmp Evaluate"
+    volumes:
+      - ./evaluation:/app/evaluation

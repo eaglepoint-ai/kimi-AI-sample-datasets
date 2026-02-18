@@ -1,0 +1,11 @@
+{
+  "instance_id": "500ZHZ",
+  "problem_statement": "Refactor the get_paginated_images function in a Python gallery module to achieve O(k) pagination retrieval (where k is page size) by eliminating linear scans of the full dataset, using precomputed sorted indices and album‑filtered offset mappings that are updated incrementally under ongoing mutations. Preserve exact behavioral equivalence—ordering, metadata, filtering semantics, and signature—while ensuring album‑specific queries avoid processing unrelated images, ordering remains deterministic with duplicate timestamps, and memory overhead is minimized. The solution must handle all edge cases gracefully, include validation confirming equivalence with the original, and maintain production‑grade readability and maintainability.",
+  "base_commit": "repository_before/",
+  "test_patch": "tests/",
+  "github_url": "https://github.com/eaglepoint-ai/kimi-AI-sample-datasets/tree/main/500zhz-special-python-gallery-optimization-task",
+  "environment_setup": "Dockerfile",
+  "FAIL_TO_PASS": [],
+  "PASS_TO_PASS": []
+}
+        

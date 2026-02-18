@@ -1,0 +1,10 @@
+{
+  "instance_id": "X4P5C9",
+  "problem_statement": "Refactor a single‑process Python data‑processing script that currently exhibits O(n²) complexity, redundant globals, and inefficient string concatenation to achieve linear O(n) performance by eliminating nested loops, using pass‑through aggregation, and assembling reports with join() while preserving byte‑identical console output. Remove shared mutable globals by refactoring into pure functions with clear separation of loading, normalization, statistics, reporting, and analysis stages, making each unit independently testable. Include a comprehensive test suite validating both functional correctness and performance characteristics, with memory usage scaling linearly and no third‑party dependencies.",
+  "base_commit": "repository_before/",
+  "test_patch": "tests/",
+  "github_url": "https://github.com/eaglepoint-ai/kimi-AI-sample-datasets/tree/main/x4p5c9-special-single-process-python",
+  "environment_setup": "Dockerfile",
+  "FAIL_TO_PASS": [],
+  "PASS_TO_PASS": []
+}

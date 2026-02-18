@@ -1,0 +1,4 @@
+repository_after/node_modules
+repository_before/node_modules
+node_modules
+.git

@@ -1,0 +1,27 @@
+# Docker Compose: before (tests vs repo_before), after (tests vs repo_after), evaluation (full report).
+
+services:
+  before:
+    build: .
+    environment:
+      - REPO_PATH=repository_before
+    command: python tests/test_main.py
+    volumes:
+      - .:/app
+    working_dir: /app
+
+  after:
+    build: .
+    environment:
+      - REPO_PATH=repository_after
+    command: python tests/test_main.py
+    volumes:
+      - .:/app
+    working_dir: /app
+
+  evaluation:
+    build: .
+    command: python scripts/run_evaluation.py
+    volumes:
+      - .:/app
+    working_dir: /app
